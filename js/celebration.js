@@ -1,0 +1,1982 @@
+﻿/* ============================================================================
+ * SEHRISH BIRTHDAY WEBSITE
+ * File: js/celebration.js
+ * Version: 1.0.0
+ *
+ * Production-ready birthday celebration orchestration engine.
+ *
+ * Responsibilities:
+ * - Coordinate birthday milestones
+ * - Track module completion
+ * - Trigger celebration stages
+ * - Coordinate confetti
+ * - Coordinate visual effects
+ * - Coordinate theme moods
+ * - Coordinate notifications
+ * - Prevent duplicate celebration triggers
+ * - Persist celebration progress
+ * - Support reset / replay
+ * - Provide application-wide celebration events
+ *
+ * This module coordinates existing modules.
+ * It does not replace:
+ * - quiz.js
+ * - gifts.js
+ * - cake.js
+ * - letter.js
+ * - confetti.js
+ * - effects.js
+ * - theme.js
+ * - notifications.js
+ *
+ * ========================================================================== */
+
+(() => {
+    "use strict";
+
+    /* ------------------------------------------------------------------------
+     * CONSTANTS
+     * --------------------------------------------------------------------- */
+
+    const VERSION = "1.0.0";
+
+    const STORAGE_KEY =
+        "sehrish-birthday-celebration-v1";
+
+    const MILESTONES = Object.freeze({
+        quiz:
+            "quiz",
+
+        gifts:
+            "gifts",
+
+        cake:
+            "cake",
+
+        letter:
+            "letter",
+
+        final:
+            "final"
+    });
+
+    const MILESTONE_ORDER =
+        Object.freeze([
+            MILESTONES.quiz,
+            MILESTONES.gifts,
+            MILESTONES.cake,
+            MILESTONES.letter
+        ]);
+
+    const EVENTS = Object.freeze({
+        ready:
+            "sehrish:celebration:ready",
+
+        milestone:
+            "sehrish:celebration:milestone",
+
+        progress:
+            "sehrish:celebration:progress",
+
+        stage:
+            "sehrish:celebration:stage",
+
+        finalStart:
+            "sehrish:celebration:final-start",
+
+        finalComplete:
+            "sehrish:celebration:final-complete",
+
+        reset:
+            "sehrish:celebration:reset"
+    });
+
+    const DEFAULTS = Object.freeze({
+        enabled:
+            true,
+
+        persist:
+            true,
+
+        celebrationDelay:
+            120,
+
+        milestoneCooldown:
+            900,
+
+        finalCelebrationDelay:
+            350,
+
+        triggerConfetti:
+            true,
+
+        triggerEffects:
+            true,
+
+        triggerTheme:
+            true,
+
+        triggerNotifications:
+            true
+    });
+
+    /* ------------------------------------------------------------------------
+     * UTILITY FUNCTIONS
+     * --------------------------------------------------------------------- */
+
+    const dispatch = (
+        eventName,
+        detail = {}
+    ) => {
+        try {
+            window.dispatchEvent(
+                new CustomEvent(
+                    eventName,
+                    {
+                        detail
+                    }
+                )
+            );
+        } catch {
+            /*
+             * Celebration must never break the
+             * rest of the application because of
+             * an event-dispatch failure.
+             */
+        }
+    };
+
+    const normalizeMilestone = (
+        value
+    ) => {
+        const normalized =
+            String(
+                value || ""
+            )
+                .trim()
+                .toLowerCase();
+
+        return Object.values(
+            MILESTONES
+        ).includes(
+            normalized
+        )
+            ? normalized
+            : null;
+    };
+
+    const now = () => {
+        return Date.now();
+    };
+
+    const wait = (
+        milliseconds
+    ) => {
+        if (
+            !milliseconds ||
+            milliseconds <= 0
+        ) {
+            return Promise.resolve();
+        }
+
+        return new Promise(
+            (resolve) => {
+                window.setTimeout(
+                    resolve,
+                    milliseconds
+                );
+            }
+        );
+    };
+
+    /* ------------------------------------------------------------------------
+     * MILESTONE RECORD
+     * --------------------------------------------------------------------- */
+
+    class CelebrationMilestone {
+        constructor(
+            id,
+            title
+        ) {
+            this.id =
+                id;
+
+            this.title =
+                title;
+
+            this.completed =
+                false;
+
+            this.completedAt =
+                null;
+
+            this.triggerCount =
+                0;
+
+            this.lastTriggeredAt =
+                null;
+        }
+
+        complete() {
+            this.completed =
+                true;
+
+            this.completedAt =
+                now();
+
+            this.triggerCount +=
+                1;
+
+            this.lastTriggeredAt =
+                now();
+        }
+
+        reset() {
+            this.completed =
+                false;
+
+            this.completedAt =
+                null;
+
+            this.triggerCount =
+                0;
+
+            this.lastTriggeredAt =
+                null;
+        }
+
+        getState() {
+            return {
+                id:
+                    this.id,
+
+                title:
+                    this.title,
+
+                completed:
+                    this.completed,
+
+                completedAt:
+                    this.completedAt,
+
+                triggerCount:
+                    this.triggerCount,
+
+                lastTriggeredAt:
+                    this.lastTriggeredAt
+            };
+        }
+    }
+
+    /* ------------------------------------------------------------------------
+     * CELEBRATION MANAGER
+     * --------------------------------------------------------------------- */
+
+    class BirthdayCelebrationManager {
+        constructor(
+            options = {}
+        ) {
+            this.options = {
+                ...DEFAULTS,
+                ...options
+            };
+
+            this.milestones =
+                new Map();
+
+            this.initialized =
+                false;
+
+            this.destroyed =
+                false;
+
+            this.running =
+                false;
+
+            this.finalCompleted =
+                false;
+
+            this.lastMilestoneTime =
+                0;
+
+            this.listeners =
+                [];
+
+            this.state = {
+                started:
+                    false,
+
+                completed:
+                    false,
+
+                finalStarted:
+                    false,
+
+                completedMilestones:
+                    [],
+
+                celebrationCount:
+                    0
+            };
+
+            this.createMilestones();
+        }
+
+        /* --------------------------------------------------------------------
+         * CREATE MILESTONES
+         * ----------------------------------------------------------------- */
+
+        createMilestones() {
+            this.milestones.clear();
+
+            const titles = {
+                quiz:
+                    "Quiz Complete",
+
+                gifts:
+                    "All Gifts Opened",
+
+                cake:
+                    "Cake Complete",
+
+                letter:
+                    "Letter Complete",
+
+                final:
+                    "Birthday Celebration"
+            };
+
+            Object.entries(
+                titles
+            ).forEach(
+                (
+                    [
+                        id,
+                        title
+                    ]
+                ) => {
+                    this.milestones.set(
+                        id,
+                        new CelebrationMilestone(
+                            id,
+                            title
+                        )
+                    );
+                }
+            );
+        }
+
+        /* --------------------------------------------------------------------
+         * INITIALIZATION
+         * ----------------------------------------------------------------- */
+
+        init(
+            options = {}
+        ) {
+            if (
+                this.destroyed
+            ) {
+                return this;
+            }
+
+            this.options = {
+                ...this.options,
+                ...options
+            };
+
+            this.loadState();
+
+            this.restoreMilestones();
+
+            this.bindEvents();
+
+            this.updateDocumentState();
+
+            this.initialized =
+                true;
+
+            dispatch(
+                EVENTS.ready,
+                {
+                    manager:
+                        this,
+
+                    state:
+                        this.getState()
+                }
+            );
+
+            return this;
+        }
+
+        /* --------------------------------------------------------------------
+         * EVENT BINDING
+         * ----------------------------------------------------------------- */
+
+        bindEvents() {
+            if (
+                this.listeners.length
+            ) {
+                return;
+            }
+
+            this.addListener(
+                window,
+                "sehrish:quiz:completed",
+                (
+                    event
+                ) => {
+                    this.completeMilestone(
+                        MILESTONES.quiz,
+                        {
+                            source:
+                                "quiz",
+                            event
+                        }
+                    );
+                }
+            );
+
+            this.addListener(
+                window,
+                "sehrish:gifts:all-opened",
+                (
+                    event
+                ) => {
+                    this.completeMilestone(
+                        MILESTONES.gifts,
+                        {
+                            source:
+                                "gifts",
+                            event
+                        }
+                    );
+                }
+            );
+
+            this.addListener(
+                window,
+                "sehrish:cake:completed",
+                (
+                    event
+                ) => {
+                    this.completeMilestone(
+                        MILESTONES.cake,
+                        {
+                            source:
+                                "cake",
+                            event
+                        }
+                    );
+                }
+            );
+
+            this.addListener(
+                window,
+                "sehrish:letter:completed",
+                (
+                    event
+                ) => {
+                    this.completeMilestone(
+                        MILESTONES.letter,
+                        {
+                            source:
+                                "letter",
+                            event
+                        }
+                    );
+                }
+            );
+
+            this.addListener(
+                window,
+                "sehrish:scenes:ready",
+                () => {
+                    this.updateDocumentState();
+                }
+            );
+        }
+
+        addListener(
+            target,
+            eventName,
+            handler
+        ) {
+            target.addEventListener(
+                eventName,
+                handler
+            );
+
+            this.listeners.push({
+                target,
+                eventName,
+                handler
+            });
+        }
+
+        /* --------------------------------------------------------------------
+         * COMPLETE MILESTONE
+         * ----------------------------------------------------------------- */
+
+        async completeMilestone(
+            milestoneId,
+            options = {}
+        ) {
+            if (
+                !this.options.enabled ||
+                this.destroyed
+            ) {
+                return false;
+            }
+
+            const id =
+                normalizeMilestone(
+                    milestoneId
+                );
+
+            if (
+                !id ||
+                !this.milestones.has(
+                    id
+                )
+            ) {
+                return false;
+            }
+
+            const milestone =
+                this.milestones.get(
+                    id
+                );
+
+            const currentTime =
+                now();
+
+            if (
+                currentTime -
+                    this.lastMilestoneTime <
+                this.options
+                    .milestoneCooldown
+            ) {
+                if (
+                    milestone.completed
+                ) {
+                    return true;
+                }
+            }
+
+            this.lastMilestoneTime =
+                currentTime;
+
+            const wasCompleted =
+                milestone.completed;
+
+            if (
+                !wasCompleted
+            ) {
+                milestone.complete();
+            } else {
+                milestone.triggerCount +=
+                    1;
+
+                milestone.lastTriggeredAt =
+                    currentTime;
+            }
+
+            this.state.started =
+                true;
+
+            this.addUnique(
+                this.state
+                    .completedMilestones,
+                id
+            );
+
+            this.state.celebrationCount +=
+                1;
+
+            this.updateDocumentState();
+
+            this.persistState();
+
+            dispatch(
+                EVENTS.milestone,
+                {
+                    manager:
+                        this,
+
+                    milestone,
+
+                    id,
+
+                    source:
+                        options.source ||
+                        "api",
+
+                    firstCompletion:
+                        !wasCompleted
+                }
+            );
+
+            await wait(
+                this.options
+                    .celebrationDelay
+            );
+
+            await this.runMilestoneCelebration(
+                id,
+                {
+                    source:
+                        options.source ||
+                        "api"
+                }
+            );
+
+            this.updateProgress();
+
+            if (
+                this.isFinalReady()
+            ) {
+                await this.startFinalCelebration();
+            }
+
+            return true;
+        }
+
+        /* --------------------------------------------------------------------
+         * MILESTONE CELEBRATION
+         * ----------------------------------------------------------------- */
+
+        async runMilestoneCelebration(
+            id,
+            options = {}
+        ) {
+            if (
+                this.destroyed
+            ) {
+                return;
+            }
+
+            const notification =
+                this.getNotificationManager();
+
+            const confetti =
+                this.getConfettiManager();
+
+            const effects =
+                this.getEffectsManager();
+
+            const theme =
+                this.getThemeManager();
+
+            switch (
+                id
+            ) {
+                case MILESTONES.quiz:
+                    if (
+                        this.options
+                            .triggerNotifications &&
+                        notification
+                    ) {
+                        notification.success(
+                            "Quiz complete! ðŸ’–",
+                            {
+                                duration:
+                                    2200,
+                                source:
+                                    "celebration"
+                            }
+                        );
+                    }
+
+                    if (
+                        this.options
+                            .triggerTheme &&
+                        theme
+                    ) {
+                        theme.setMood(
+                            "celebration"
+                        );
+                    }
+
+                    if (
+                        this.options
+                            .triggerConfetti &&
+                        confetti
+                    ) {
+                        confetti.burst({
+                            count:
+                                48
+                        });
+                    }
+
+                    break;
+
+                case MILESTONES.gifts:
+                    if (
+                        this.options
+                            .triggerNotifications &&
+                        notification
+                    ) {
+                        notification.success(
+                            "All the gifts are open! ðŸŽ",
+                            {
+                                duration:
+                                    2300,
+                                source:
+                                    "celebration"
+                            }
+                        );
+                    }
+
+                    if (
+                        this.options
+                            .triggerEffects &&
+                        effects
+                    ) {
+                        const target =
+                            document.querySelector(
+                                "[data-gifts], " +
+                                "[data-gift-area]"
+                            );
+
+                        if (
+                            target
+                        ) {
+                            effects.sparkle(
+                                target,
+                                {
+                                    count:
+                                        18
+                                }
+                            );
+                        }
+                    }
+
+                    if (
+                        this.options
+                            .triggerConfetti &&
+                        confetti
+                    ) {
+                        await confetti.doubleBurst(
+                            {
+                                count:
+                                    42,
+                                gap:
+                                    220
+                            }
+                        );
+                    }
+
+                    break;
+
+                case MILESTONES.cake:
+                    if (
+                        this.options
+                            .triggerNotifications &&
+                        notification
+                    ) {
+                        notification.success(
+                            "The birthday cake is ready! ðŸŽ‚",
+                            {
+                                duration:
+                                    2500,
+                                source:
+                                    "celebration"
+                            }
+                        );
+                    }
+
+                    if (
+                        this.options
+                            .triggerTheme &&
+                        theme
+                    ) {
+                        theme.setMood(
+                            "cake"
+                        );
+                    }
+
+                    if (
+                        this.options
+                            .triggerEffects &&
+                        effects
+                    ) {
+                        const cake =
+                            document.querySelector(
+                                "[data-cake], " +
+                                ".birthday-cake"
+                            );
+
+                        if (
+                            cake
+                        ) {
+                            effects.pulse(
+                                cake,
+                                {
+                                    duration:
+                                        900
+                                }
+                            );
+
+                            effects.sparkle(
+                                cake,
+                                {
+                                    count:
+                                        20
+                                }
+                            );
+                        }
+                    }
+
+                    if (
+                        this.options
+                            .triggerConfetti &&
+                        confetti
+                    ) {
+                        confetti.centerBurst({
+                            count:
+                                82
+                        });
+                    }
+
+                    break;
+
+                case MILESTONES.letter:
+                    if (
+                        this.options
+                            .triggerNotifications &&
+                        notification
+                    ) {
+                        notification.success(
+                            "The birthday letter is complete! ðŸ’Œ",
+                            {
+                                duration:
+                                    2700,
+                                source:
+                                    "celebration"
+                            }
+                        );
+                    }
+
+                    if (
+                        this.options
+                            .triggerTheme &&
+                        theme
+                    ) {
+                        theme.setMood(
+                            "celebration"
+                        );
+                    }
+
+                    if (
+                        this.options
+                            .triggerEffects &&
+                        effects
+                    ) {
+                        const letter =
+                            document.querySelector(
+                                "[data-letter], " +
+                                ".birthday-letter"
+                            );
+
+                        if (
+                            letter
+                        ) {
+                            effects.fadeIn(
+                                letter,
+                                {
+                                    duration:
+                                        650
+                                }
+                            );
+
+                            effects.sparkle(
+                                letter,
+                                {
+                                    count:
+                                        22
+                                }
+                            );
+                        }
+                    }
+
+                    break;
+
+                default:
+                    break;
+            }
+
+            dispatch(
+                EVENTS.stage,
+                {
+                    manager:
+                        this,
+
+                    milestone:
+                        id,
+
+                    source:
+                        options.source ||
+                        "api"
+                }
+            );
+        }
+
+        /* --------------------------------------------------------------------
+         * FINAL CHECK
+         * ----------------------------------------------------------------- */
+
+        isFinalReady() {
+            return MILESTONE_ORDER.every(
+                (
+                    id
+                ) => {
+                    const milestone =
+                        this.milestones.get(
+                            id
+                        );
+
+                    return Boolean(
+                        milestone
+                            ?.completed
+                    );
+                }
+            );
+        }
+
+        /* --------------------------------------------------------------------
+         * FINAL CELEBRATION
+         * ----------------------------------------------------------------- */
+
+        async startFinalCelebration() {
+            if (
+                this.finalCompleted ||
+                this.state
+                    .finalStarted ||
+                this.running
+            ) {
+                return false;
+            }
+
+            this.running =
+                true;
+
+            this.state.finalStarted =
+                true;
+
+            this.updateDocumentState();
+
+            this.persistState();
+
+            dispatch(
+                EVENTS.finalStart,
+                {
+                    manager:
+                        this,
+
+                    state:
+                        this.getState()
+                }
+            );
+
+            await wait(
+                this.options
+                    .finalCelebrationDelay
+            );
+
+            const theme =
+                this.getThemeManager();
+
+            const notifications =
+                this.getNotificationManager();
+
+            const effects =
+                this.getEffectsManager();
+
+            const confetti =
+                this.getConfettiManager();
+
+            if (
+                this.options
+                    .triggerTheme &&
+                theme
+            ) {
+                theme.setMood(
+                    "celebration"
+                );
+
+                theme.setIntensity(
+                    1.15
+                );
+            }
+
+            if (
+                this.options
+                    .triggerNotifications &&
+                notifications
+            ) {
+                notifications.success(
+                    "Happy Birthday! ðŸŽ‚ðŸ’–âœ¨",
+                    {
+                        title:
+                            "The surprise is complete",
+
+                        duration:
+                            4200,
+
+                        persistent:
+                            false,
+
+                        source:
+                            "final-celebration"
+                    }
+                );
+            }
+
+            if (
+                this.options
+                    .triggerEffects &&
+                effects
+            ) {
+                const targets =
+                    document.querySelectorAll(
+                        "[data-final-celebration], " +
+                        "[data-birthday-title], " +
+                        "[data-birthday-message]"
+                    );
+
+                targets.forEach(
+                    (
+                        target,
+                        index
+                    ) => {
+                        void effects.pop(
+                            target,
+                            {
+                                delay:
+                                    index *
+                                    100,
+
+                                duration:
+                                    700,
+
+                                source:
+                                    "final-celebration"
+                            }
+                        );
+                    }
+                );
+
+                effects.particles({
+                    count:
+                        28,
+
+                    duration:
+                        6000,
+
+                    symbol:
+                        "âœ¦"
+                });
+            }
+
+            if (
+                this.options
+                    .triggerConfetti &&
+                confetti
+            ) {
+                await confetti.celebrate({
+                    bursts:
+                        7,
+
+                    gap:
+                        320,
+
+                    count:
+                        62,
+
+                    centerCount:
+                        110
+                });
+            }
+
+            this.finalCompleted =
+                true;
+
+            this.state.completed =
+                true;
+
+            this.running =
+                false;
+
+            this.updateDocumentState();
+
+            this.persistState();
+
+            dispatch(
+                EVENTS.finalComplete,
+                {
+                    manager:
+                        this,
+
+                    state:
+                        this.getState()
+                }
+            );
+
+            return true;
+        }
+
+        /* --------------------------------------------------------------------
+         * MANAGER LOOKUPS
+         * ----------------------------------------------------------------- */
+
+        getConfettiManager() {
+            const confetti =
+                window.SehrishConfetti;
+
+            if (
+                confetti &&
+                typeof confetti.burst ===
+                    "function"
+            ) {
+                return confetti;
+            }
+
+            return null;
+        }
+
+        getEffectsManager() {
+            const effects =
+                window.SehrishEffects;
+
+            if (
+                effects &&
+                typeof effects.play ===
+                    "function"
+            ) {
+                return effects;
+            }
+
+            return null;
+        }
+
+        getThemeManager() {
+            const theme =
+                window.SehrishTheme;
+
+            if (
+                theme &&
+                typeof theme.setMood ===
+                    "function"
+            ) {
+                return theme;
+            }
+
+            return null;
+        }
+
+        getNotificationManager() {
+            const notifications =
+                window.SehrishNotifications;
+
+            if (
+                notifications &&
+                typeof notifications.success ===
+                    "function"
+            ) {
+                return notifications;
+            }
+
+            return null;
+        }
+
+        /* --------------------------------------------------------------------
+         * PROGRESS
+         * ----------------------------------------------------------------- */
+
+        updateProgress() {
+            const total =
+                MILESTONE_ORDER.length;
+
+            const completed =
+                MILESTONE_ORDER.filter(
+                    (
+                        id
+                    ) =>
+                        this.milestones.get(
+                            id
+                        )?.completed
+                ).length;
+
+            const percentage =
+                total > 0
+                    ? Math.round(
+                          (completed /
+                              total) *
+                              100
+                      )
+                    : 0;
+
+            this.updateDocumentState();
+
+            dispatch(
+                EVENTS.progress,
+                {
+                    manager:
+                        this,
+
+                    completed,
+
+                    total,
+
+                    percentage
+                }
+            );
+        }
+
+        /* --------------------------------------------------------------------
+         * DOCUMENT STATE
+         * ----------------------------------------------------------------- */
+
+        updateDocumentState() {
+            const root =
+                document.documentElement;
+
+            const body =
+                document.body;
+
+            const completed =
+                MILESTONE_ORDER.filter(
+                    (
+                        id
+                    ) =>
+                        this.milestones.get(
+                            id
+                        )?.completed
+                ).length;
+
+            const total =
+                MILESTONE_ORDER.length;
+
+            const percentage =
+                total > 0
+                    ? Math.round(
+                          (completed /
+                              total) *
+                              100
+                      )
+                    : 0;
+
+            root.dataset.celebrationProgress =
+                String(
+                    percentage
+                );
+
+            root.dataset.celebrationComplete =
+                this.state.completed
+                    ? "true"
+                    : "false";
+
+            root.dataset.celebrationStage =
+                String(
+                    completed
+                );
+
+            body?.classList.toggle(
+                "birthday-celebration-active",
+                this.running
+            );
+
+            body?.classList.toggle(
+                "birthday-celebration-complete",
+                this.state.completed
+            );
+            body?.dataset.celebrationStage =
+                String(
+                    completed
+                );
+        }
+
+        /* --------------------------------------------------------------------
+         * RESET
+         * ----------------------------------------------------------------- */
+
+        reset(
+            options = {}
+        ) {
+            this.running =
+                false;
+
+            this.finalCompleted =
+                false;
+
+            this.state = {
+                started:
+                    false,
+
+                completed:
+                    false,
+
+                finalStarted:
+                    false,
+
+                completedMilestones:
+                    [],
+
+                celebrationCount:
+                    0
+            };
+
+            this.milestones.forEach(
+                (
+                    milestone
+                ) => {
+                    milestone.reset();
+                }
+            );
+
+            this.updateDocumentState();
+
+            if (
+                options.clearStorage !==
+                false
+            ) {
+                this.clearStorage();
+            }
+
+            dispatch(
+                EVENTS.reset,
+                {
+                    manager:
+                        this
+                }
+            );
+
+            this.updateProgress();
+
+            return this;
+        }
+
+        /* --------------------------------------------------------------------
+         * STORAGE
+         * ----------------------------------------------------------------- */
+
+        persistState() {
+            if (
+                !this.options
+                    .persist
+            ) {
+                return;
+            }
+
+            try {
+                localStorage.setItem(
+                    STORAGE_KEY,
+                    JSON.stringify(
+                        {
+                            version:
+                                VERSION,
+
+                            state:
+                                this.state,
+
+                            milestones:
+                                Array.from(
+                                    this.milestones.values()
+                                ).map(
+                                    (
+                                        milestone
+                                    ) =>
+                                        milestone.getState()
+                                ),
+
+                            savedAt:
+                                now()
+                        }
+                    )
+                );
+            } catch {
+                /*
+                 * Storage can be unavailable.
+                 */
+            }
+        }
+
+        loadState() {
+            if (
+                !this.options
+                    .persist
+            ) {
+                return;
+            }
+
+            try {
+                const raw =
+                    localStorage.getItem(
+                        STORAGE_KEY
+                    );
+
+                if (!raw) {
+                    return;
+                }
+
+                const parsed =
+                    JSON.parse(
+                        raw
+                    );
+
+                if (
+                    !parsed ||
+                    typeof parsed !==
+                        "object"
+                ) {
+                    return;
+                }
+
+                if (
+                    parsed.state &&
+                    typeof parsed.state ===
+                        "object"
+                ) {
+                    this.state = {
+                        started:
+                            Boolean(
+                                parsed
+                                    .state
+                                    .started
+                            ),
+
+                        completed:
+                            Boolean(
+                                parsed
+                                    .state
+                                    .completed
+                            ),
+
+                        finalStarted:
+                            Boolean(
+                                parsed
+                                    .state
+                                    .finalStarted
+                            ),
+
+                        completedMilestones:
+                            Array.isArray(
+                                parsed
+                                    .state
+                                    .completedMilestones
+                            )
+                                ? [
+                                      ...parsed
+                                          .state
+                                          .completedMilestones
+                                  ]
+                                : [],
+
+                        celebrationCount:
+                            Number.isFinite(
+                                parsed
+                                    .state
+                                    .celebrationCount
+                            )
+                                ? parsed
+                                      .state
+                                      .celebrationCount
+                                : 0
+                    };
+                }
+            } catch {
+                this.state = {
+                    started:
+                        false,
+
+                    completed:
+                        false,
+
+                    finalStarted:
+                        false,
+
+                    completedMilestones:
+                        [],
+
+                    celebrationCount:
+                        0
+                };
+            }
+        }
+
+        /* --------------------------------------------------------------------
+         * RESTORE MILESTONES
+         * ----------------------------------------------------------------- */
+
+        restoreMilestones() {
+            const saved =
+                this.state
+                    .completedMilestones;
+
+            this.milestones.forEach(
+                (
+                    milestone,
+                    id
+                ) => {
+                    if (
+                        saved.includes(
+                            id
+                        )
+                    ) {
+                        milestone.completed =
+                            true;
+
+                        milestone.completedAt =
+                            now();
+                    }
+                }
+            );
+
+            this.finalCompleted =
+                Boolean(
+                    this.state.completed
+                );
+        }
+
+        /* --------------------------------------------------------------------
+         * CLEAR STORAGE
+         * ----------------------------------------------------------------- */
+
+        clearStorage() {
+            try {
+                localStorage.removeItem(
+                    STORAGE_KEY
+                );
+            } catch {
+                /*
+                 * Ignore storage errors.
+                 */
+            }
+        }
+
+        /* --------------------------------------------------------------------
+         * ARRAY HELPER
+         * ----------------------------------------------------------------- */
+
+        addUnique(
+            array,
+            value
+        ) {
+            if (
+                !array.includes(
+                    value
+                )
+            ) {
+                array.push(
+                    value
+                );
+            }
+        }
+
+        /* --------------------------------------------------------------------
+         * MILESTONE GETTERS
+         * ----------------------------------------------------------------- */
+
+        getMilestone(
+            id
+        ) {
+            const normalized =
+                normalizeMilestone(
+                    id
+                );
+
+            return (
+                this.milestones.get(
+                    normalized
+                ) ||
+                null
+            );
+        }
+
+        isMilestoneCompleted(
+            id
+        ) {
+            return Boolean(
+                this.getMilestone(
+                    id
+                )?.completed
+            );
+        }
+
+        getCompletedMilestones() {
+            return MILESTONE_ORDER.filter(
+                (
+                    id
+                ) =>
+                    this.isMilestoneCompleted(
+                        id
+                    )
+            );
+        }
+
+        getCompletedCount() {
+            return this
+                .getCompletedMilestones()
+                .length;
+        }
+
+        getTotalCount() {
+            return MILESTONE_ORDER.length;
+        }
+
+        getProgressPercent() {
+            const total =
+                this.getTotalCount();
+
+            if (
+                total === 0
+            ) {
+                return 0;
+            }
+
+            return Math.round(
+                (this.getCompletedCount() /
+                    total) *
+                    100
+            );
+        }
+
+        /* --------------------------------------------------------------------
+         * STATE
+         * ----------------------------------------------------------------- */
+
+        getState() {
+            return {
+                version:
+                    VERSION,
+
+                initialized:
+                    this.initialized,
+
+                destroyed:
+                    this.destroyed,
+
+                running:
+                    this.running,
+
+                finalCompleted:
+                    this.finalCompleted,
+
+                state:
+                    {
+                        ...this.state,
+
+                        completedMilestones:
+                            [
+                                ...this.state
+                                    .completedMilestones
+                            ]
+                    },
+
+                progress:
+                    this.getProgressPercent(),
+
+                completedCount:
+                    this.getCompletedCount(),
+
+                totalMilestones:
+                    this.getTotalCount(),
+
+                milestones:
+                    Array.from(
+                        this.milestones.values()
+                    ).map(
+                        (
+                            milestone
+                        ) =>
+                            milestone.getState()
+                    )
+            };
+        }
+
+        /* --------------------------------------------------------------------
+         * REFRESH
+         * ----------------------------------------------------------------- */
+
+        refresh() {
+            this.loadState();
+
+            this.restoreMilestones();
+
+            this.updateDocumentState();
+
+            this.updateProgress();
+
+            return this;
+        }
+
+        /* --------------------------------------------------------------------
+         * DESTROY
+         * ----------------------------------------------------------------- */
+
+        destroy() {
+            if (
+                this.destroyed
+            ) {
+                return;
+            }
+
+            this.listeners.forEach(
+                ({
+                    target,
+                    eventName,
+                    handler
+                }) => {
+                    target.removeEventListener(
+                        eventName,
+                        handler
+                    );
+                }
+            );
+
+            this.listeners =
+                [];
+
+            this.running =
+                false;
+
+            this.initialized =
+                false;
+
+            this.destroyed =
+                true;
+        }
+    }
+
+    /* ------------------------------------------------------------------------
+     * SINGLETON
+     * --------------------------------------------------------------------- */
+
+    let manager =
+        null;
+
+    /* ------------------------------------------------------------------------
+     * PUBLIC API
+     * --------------------------------------------------------------------- */
+
+    const api = {
+        VERSION,
+
+        MILESTONES,
+
+        init(
+            options = {}
+        ) {
+            if (
+                !manager
+            ) {
+                manager =
+                    new BirthdayCelebrationManager(
+                        options
+                    );
+            }
+
+            return manager.init(
+                options
+            );
+        },
+
+        getManager() {
+            if (
+                !manager
+            ) {
+                manager =
+                    new BirthdayCelebrationManager();
+
+                manager.init();
+            }
+
+            return manager;
+        },
+
+        completeMilestone(
+            milestoneId,
+            options = {}
+        ) {
+            return this
+                .getManager()
+                .completeMilestone(
+                    milestoneId,
+                    options
+                );
+        },
+
+        isFinalReady() {
+            return this
+                .getManager()
+                .isFinalReady();
+        },
+
+        startFinalCelebration() {
+            return this
+                .getManager()
+                .startFinalCelebration();
+        },
+
+        getMilestone(
+            milestoneId
+        ) {
+            return this
+                .getManager()
+                .getMilestone(
+                    milestoneId
+                );
+        },
+
+        isMilestoneCompleted(
+            milestoneId
+        ) {
+            return this
+                .getManager()
+                .isMilestoneCompleted(
+                    milestoneId
+                );
+        },
+
+        getCompletedMilestones() {
+            return this
+                .getManager()
+                .getCompletedMilestones();
+        },
+
+        getCompletedCount() {
+            return this
+                .getManager()
+                .getCompletedCount();
+        },
+
+        getTotalCount() {
+            return this
+                .getManager()
+                .getTotalCount();
+        },
+
+        getProgressPercent() {
+            return this
+                .getManager()
+                .getProgressPercent();
+        },
+
+        getState() {
+            return this
+                .getManager()
+                .getState();
+        },
+
+        reset(
+            options = {}
+        ) {
+            return this
+                .getManager()
+                .reset(
+                    options
+                );
+        },
+
+        refresh() {
+            return this
+                .getManager()
+                .refresh();
+        },
+
+        persistState() {
+            return this
+                .getManager()
+                .persistState();
+        },
+
+        clearStorage() {
+            return this
+                .getManager()
+                .clearStorage();
+        },
+
+        destroy() {
+            if (
+                manager
+            ) {
+                manager.destroy();
+            }
+
+            manager =
+                null;
+        }
+    };
+
+    /* ------------------------------------------------------------------------
+     * GLOBAL EXPORTS
+     * --------------------------------------------------------------------- */
+
+    window.CelebrationMilestone =
+        CelebrationMilestone;
+
+    window.BirthdayCelebrationManager =
+        BirthdayCelebrationManager;
+
+    window.SehrishCelebration =
+        api;
+
+    window.SehrishBirthdayCelebration =
+        api;
+
+    /* ------------------------------------------------------------------------
+     * AUTO BOOT
+     * --------------------------------------------------------------------- */
+
+    const boot = () => {
+        try {
+            api.init();
+        } catch (
+            error
+        ) {
+            console.error(
+                "[SehrishCelebration] " +
+                "Initialization failed:",
+                error
+            );
+        }
+    };
+
+    if (
+        document.readyState ===
+        "loading"
+    ) {
+        document.addEventListener(
+            "DOMContentLoaded",
+            boot,
+            {
+                once:
+                    true
+            }
+        );
+    } else {
+        boot();
+    }
+
+    /* ------------------------------------------------------------------------
+     * APP READY
+     * --------------------------------------------------------------------- */
+
+    window.addEventListener(
+        "sehrish:app:ready",
+        () => {
+            if (
+                manager &&
+                !manager.initialized
+            ) {
+                manager.init();
+            }
+        }
+    );
+
+    console.info(
+        `[SehrishCelebration] ` +
+        `Celebration module v${VERSION} loaded.`
+    );
+})();
