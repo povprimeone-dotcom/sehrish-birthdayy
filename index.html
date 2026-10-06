@@ -1,4 +1,4 @@
-﻿
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -4483,7 +4483,7 @@
                             </div>
 
                             <h2>
-                                Yaaaayyy! 4 Pops! 🎈✨
+                                Yaaaayyy! 16 Pops! 🎈✨
                             </h2>
 
                             <p>
@@ -4560,19 +4560,15 @@
             nextButton.disabled;
     };
 
-    const resetGameOnReturn = () => {
-        lockNextButton();
-
-        window.setTimeout(() => {
-            if (
-                window.BalloonGame &&
-                typeof window.BalloonGame
-                    .resetAndStart === "function"
-            ) {
-                window.BalloonGame.resetAndStart();
-            }
-        }, 100);
-    };
+    /*
+     * BalloonGame itself resets the game whenever Scene 9
+     * is entered again. This controller only handles the
+     * Next button state so it cannot reset the game repeatedly.
+     */
+    let wasVisible =
+        scene.getAttribute(
+            "aria-hidden"
+        ) !== "true";
 
     lockNextButton();
 
@@ -4598,9 +4594,11 @@
                     "aria-hidden"
                 ) !== "true";
 
-            if (visible) {
-                resetGameOnReturn();
+            if (visible && !wasVisible) {
+                lockNextButton();
             }
+
+            wasVisible = visible;
         });
 
     sceneObserver.observe(
@@ -4608,8 +4606,7 @@
         {
             attributes: true,
             attributeFilter: [
-                "aria-hidden",
-                "class"
+                "aria-hidden"
             ]
         }
     );
@@ -9556,11 +9553,3 @@
 
 </body>
 </html>
-
-
-
-
-
-
-
-
