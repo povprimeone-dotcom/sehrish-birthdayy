@@ -4536,33 +4536,51 @@
     const scene =
         document.getElementById("scene-9");
 
-    if (!scene) {
-        return;
-    }
-
     const nextButton =
         document.getElementById(
             "balloon-next-button"
         );
 
-    if (!nextButton) {
+    if (!scene || !nextButton) {
         return;
     }
 
-    nextButton.hidden = true;
-
-    const checkGameComplete = () => {
-        if (!nextButton.disabled) {
-            nextButton.hidden = false;
-        }
+    const lockNextButton = () => {
+        nextButton.disabled = true;
+        nextButton.hidden = true;
+        nextButton.setAttribute(
+            "aria-disabled",
+            "true"
+        );
     };
 
-    const observer =
+    const syncNextButton = () => {
+        nextButton.hidden =
+            nextButton.disabled;
+    };
+
+    const resetGameOnReturn = () => {
+        lockNextButton();
+
+        window.setTimeout(() => {
+            if (
+                window.BalloonGame &&
+                typeof window.BalloonGame
+                    .resetAndStart === "function"
+            ) {
+                window.BalloonGame.resetAndStart();
+            }
+        }, 100);
+    };
+
+    lockNextButton();
+
+    const buttonObserver =
         new MutationObserver(() => {
-            checkGameComplete();
+            syncNextButton();
         });
 
-    observer.observe(
+    buttonObserver.observe(
         nextButton,
         {
             attributes: true,
@@ -4572,7 +4590,28 @@
         }
     );
 
-    checkGameComplete();
+    const sceneObserver =
+        new MutationObserver(() => {
+            const visible =
+                scene.getAttribute(
+                    "aria-hidden"
+                ) !== "true";
+
+            if (visible) {
+                resetGameOnReturn();
+            }
+        });
+
+    sceneObserver.observe(
+        scene,
+        {
+            attributes: true,
+            attributeFilter: [
+                "aria-hidden",
+                "class"
+            ]
+        }
+    );
 
 })();
 </script>

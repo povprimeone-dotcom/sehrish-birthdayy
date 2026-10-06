@@ -429,15 +429,21 @@
         portal.setAttribute("aria-hidden", "false");
         document.body.classList.add(GIFT_MEDIA.bodyClass);
 
-        requestAnimationFrame(() => {
-            try {
-                video.play()?.catch?.(() => {
-                    // Native controls remain available if autoplay is blocked.
-                });
-            } catch {
-                // Browser media policy is non-fatal.
-            }
-        });
+        video.addEventListener(
+    "canplaythrough",
+    () => {
+        try {
+            video.play()?.catch?.(() => {
+                // Native controls remain available if autoplay is blocked.
+            });
+        } catch {
+            // Browser media policy is non-fatal.
+        }
+    },
+    { once: true }
+);
+
+video.load();
 
         return true;
     }
