@@ -9551,5 +9551,305 @@
     })();
 </script>
 
+<!-- =========================================================
+     SCENE 1 PASSWORD GATE
+     Password: 75
+     ========================================================= -->
+<style>
+    #scene1-password-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: rgba(53, 37, 49, 0.42);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+
+    #scene1-password-overlay.is-visible {
+        display: flex;
+    }
+
+    .scene1-password-card {
+        width: min(92vw, 360px);
+        padding: 28px 22px 24px;
+        border: 1px solid rgba(255,255,255,.8);
+        border-radius: 24px;
+        background:
+            linear-gradient(
+                145deg,
+                rgba(255,255,255,.98),
+                rgba(255,244,249,.97)
+            );
+        box-shadow:
+            0 24px 70px rgba(86, 53, 72, .24);
+        text-align: center;
+    }
+
+    .scene1-password-card__icon {
+        font-size: 2rem;
+        margin-bottom: 8px;
+    }
+
+    .scene1-password-card h2 {
+        margin: 0;
+        color: #8a5d73;
+        font-family: "Baloo 2", cursive;
+        font-size: 1.7rem;
+        line-height: 1.1;
+    }
+
+    .scene1-password-card p {
+        margin: 8px 0 18px;
+        color: #8d7480;
+        font-family: "Nunito", sans-serif;
+        font-size: .95rem;
+    }
+
+    #scene1-password-input {
+        width: 100%;
+        box-sizing: border-box;
+        height: 50px;
+        border: 1px solid rgba(194, 132, 160, .35);
+        border-radius: 14px;
+        outline: none;
+        background: #fff;
+        color: #765467;
+        text-align: center;
+        font-family: "Nunito", sans-serif;
+        font-size: 1.35rem;
+        font-weight: 800;
+        letter-spacing: .35em;
+        padding: 0 14px;
+    }
+
+    #scene1-password-input:focus {
+        border-color: #d58aaa;
+        box-shadow: 0 0 0 4px rgba(213, 138, 170, .14);
+    }
+
+    #scene1-password-submit {
+        width: 100%;
+        min-height: 48px;
+        margin-top: 14px;
+        border: 0;
+        border-radius: 14px;
+        background: linear-gradient(135deg, #e99abb, #c982a3);
+        color: #fff;
+        font-family: "Nunito", sans-serif;
+        font-size: 1rem;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow: 0 10px 24px rgba(201, 130, 163, .24);
+    }
+
+    #scene1-password-error {
+        min-height: 22px;
+        margin-top: 10px;
+        color: #c96f8e;
+        font-family: "Nunito", sans-serif;
+        font-size: .85rem;
+        font-weight: 700;
+    }
+</style>
+
+<div
+    id="scene1-password-overlay"
+    aria-hidden="true"
+>
+    <div
+        class="scene1-password-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="scene1-password-title"
+    >
+        <div class="scene1-password-card__icon" aria-hidden="true">
+            🔐
+        </div>
+
+        <h2 id="scene1-password-title">
+            One Little Secret ✨
+        </h2>
+
+        <p>
+            Password daalo aur surprise shuru karo 💗
+        </p>
+
+        <input
+            id="scene1-password-input"
+            type="text"
+            inputmode="numeric"
+            maxlength="2"
+            autocomplete="off"
+            aria-label="Enter password"
+        >
+
+        <button
+            id="scene1-password-submit"
+            type="button"
+        >
+            Enter ✨
+        </button>
+
+        <div
+            id="scene1-password-error"
+            aria-live="polite"
+        ></div>
+    </div>
+</div>
+
+<script>
+(() => {
+    "use strict";
+
+    const PASSWORD = "75";
+
+    const startButton =
+        document.getElementById(
+            "start-surprise-button"
+        );
+
+    const overlay =
+        document.getElementById(
+            "scene1-password-overlay"
+        );
+
+    const input =
+        document.getElementById(
+            "scene1-password-input"
+        );
+
+    const submitButton =
+        document.getElementById(
+            "scene1-password-submit"
+        );
+
+    const error =
+        document.getElementById(
+            "scene1-password-error"
+        );
+
+    if (
+        !startButton ||
+        !overlay ||
+        !input ||
+        !submitButton ||
+        !error
+    ) {
+        return;
+    }
+
+    const openPopup = () => {
+        overlay.classList.add(
+            "is-visible"
+        );
+
+        overlay.setAttribute(
+            "aria-hidden",
+            "false"
+        );
+
+        input.value = "";
+        error.textContent = "";
+
+        window.setTimeout(() => {
+            input.focus();
+        }, 40);
+    };
+
+    const closePopupAndContinue = () => {
+        overlay.classList.remove(
+            "is-visible"
+        );
+
+        overlay.setAttribute(
+            "aria-hidden",
+            "true"
+        );
+
+        error.textContent = "";
+
+        if (
+            window.SehrishBirthday &&
+            typeof window.SehrishBirthday.next ===
+                "function"
+        ) {
+            window.SehrishBirthday.next();
+        }
+    };
+
+    const checkPassword = () => {
+        const value =
+            String(input.value || "")
+                .trim();
+
+        if (value === PASSWORD) {
+            closePopupAndContinue();
+            return;
+        }
+
+        error.textContent =
+            "Wrong password 😅 Dobara try karo.";
+
+        input.select();
+        input.focus();
+    };
+
+    startButton.addEventListener(
+        "click",
+        (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+
+            openPopup();
+        },
+        true
+    );
+
+    submitButton.addEventListener(
+        "click",
+        (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            checkPassword();
+        }
+    );
+
+    input.addEventListener(
+        "keydown",
+        (event) => {
+            if (
+                event.key === "Enter"
+            ) {
+                event.preventDefault();
+                checkPassword();
+            }
+
+            if (
+                event.key === "Escape"
+            ) {
+                event.preventDefault();
+            }
+        }
+    );
+
+    overlay.addEventListener(
+        "click",
+        (event) => {
+            if (
+                event.target === overlay
+            ) {
+                input.focus();
+            }
+        }
+    );
+})();
+</script>
+
 </body>
 </html>
